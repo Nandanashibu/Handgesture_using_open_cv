@@ -1,0 +1,71 @@
+import cv2
+from cvzone.HandTrackingModule import HandDetector
+from cvzone.SerialModule import SerialObject
+
+# Initialize the webcam
+cap = cv2.VideoCapture(0)
+
+# Set webcam resolution to reduce processing load
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)  # Set width to 640 pixels
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)  # Set height to 480 pixels
+
+# Check if the webcam is opened successfully
+if not cap.isOpened():
+    print("Error: Could not open webcam.")
+    exit()
+
+# Initialize the HandDetector
+detector = HandDetector(maxHands=1, detectionCon=0.7)
+
+# Initialize the SerialObject for communication with Arduino
+try:
+    mySerial = SerialObject("COM3", 9600, 1, timeout=1)  # Add a timeout of 1 second
+except Exception as e:
+    print(f"Error initializing serial communication: {e}")
+    mySerial = None  # Set mySerial to None if initialization fails
+
+try:
+    while True:
+        # Read a frame from the webcam
+        success, img = cap.read()
+        if not success:
+            print("Error: Could not read frame.")
+            break
+
+        # Detect hands in the frame
+        hands, img = detector.findHands(img)  # Returns hands and the processed image
+
+        if hands:
+            # Get the first hand detected
+            hand1 = hands[0]
+
+            # Get the landmark list and bounding box for the first hand
+            lmList = hand1["lmList"]  # List of 21 landmark points
+            bbox = hand1["bbox"]      # Bounding box info (x, y, w, h)
+
+            # Check which fingers are up
+            fingers = detector.fingersUp(hand1)
+            print("Fingers Up:", fingers)
+
+            # Send finger states to the Arduino (if serial communication is initialized)
+            if mySerial is not None:
+                try:
+                    mySerial.sendData(fingers)
+                except Exception as e:
+                    print(f"Error sending data to Arduino: {e}")
+
+        # Display the image
+        cv2.imshow("Image", img)
+
+        # Break the loop if 'q' is pressed
+        if cv2.waitKey(10) & 0xFF == ord('q'):  # Increase delay to 10ms
+            break
+
+except Exception as e:
+    print(f"An error occurred: {e}")
+
+finally:
+    # Release the webcam and close all OpenCV windows
+    cap.release()
+    cv2.destroyAllWindows()
+    print("Program exited cleanly.")

@@ -1,0 +1,120 @@
+import cv2
+from cvzone.HandTrackingModule import HandDetector
+import serial
+import time
+import math
+
+# Function to calculate the Euclidean distance between two points
+def calculate_distance(a, b):
+    return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2)
+
+# Initialize the webcam
+cap = cv2.VideoCapture(0)
+
+# Set webcam resolution to reduce processing load
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)  # Set width to 640 pixels
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)  # Set height to 480 pixels
+
+# Check if the webcam is opened successfully
+if not cap.isOpened():
+    print("Error: Could not open webcam.")
+    exit()
+
+# Initialize the HandDetector
+detector = HandDetector(maxHands=1, detectionCon=0.8)  # Correct initialization
+
+# Initialize the serial connection to Arduino
+try:
+    arduino = serial.Serial('COM8', 9600, timeout=1)  # Use COM8 for Arduino
+    time.sleep(2)  # Wait for the connection to establish
+    print("Connected to Arduino.")
+except Exception as e:
+    print(f"Error connecting to Arduino: {e}")
+    arduino = None  # Set arduino to None if initialization fails
+
+try:
+    while True:
+        # Read a frame from the webcam
+        print("Reading frame...")
+        success, img = cap.read()
+        if not success:
+            print("Error: Could not read frame.")
+            break
+
+        # Detect hands in the frame
+        print("Detecting hands...")
+        hands, img = detector.findHands(img)  # Returns hands and the processed image
+
+        if hands:
+            print("Hand detected.")
+            # Get the first hand detected
+            hand1 = hands[0]
+
+            # Get the landmark list for the first hand
+            lmList = hand1["lmList"]  # List of 21 landmark points
+
+            # Define the landmarks for each finger (base and tip)
+            fingers = {
+                "Thumb": [lmList[1], lmList[4]],  # Thumb (base and tip)
+                "Index": [lmList[5], lmList[8]],  # Index finger (base and tip)
+                "Middle": [lmList[9], lmList[12]],  # Middle finger (base and tip)
+                "Ring": [lmList[13], lmList[16]],  # Ring finger (base and tip)
+                "Pinky": [lmList[17], lmList[20]],  # Pinky finger (base and tip)
+            }
+
+            # Initialize a list to store the states of all fingers
+            finger_states = []
+
+            # Calculate the length and state for each finger
+            for finger_name, landmarks in fingers.items():
+                base = landmarks[0]  # Base of the finger
+                tip = landmarks[1]  # Tip of the finger
+
+                # Calculate the length of the finger
+                finger_length = calculate_distance(base, tip)
+
+                # Determine the finger state based on the length
+                if finger_length > 80:  # Fully up (adjust threshold as needed)
+                    finger_state = 2
+                elif 40 <= finger_length <= 80:  # Half bent (adjust threshold as needed)
+                    finger_state = 1
+                else:  # Fully down
+                    finger_state = 0
+
+                # Append the finger state to the list
+                finger_states.append(finger_state)
+
+            # Print the finger states as a list
+            print("Finger States:", finger_states)
+
+            # Send the finger states to the Arduino (if serial communication is initialized)
+            if arduino is not None:
+                try:
+                    # Convert the list to a string and send it to the Arduino
+                    data = ",".join(map(str, finger_states)) + "\n"  # Add newline character
+                    print("Sending:", data.strip())  # Print the data being sent
+                    arduino.write(data.encode())  # Encode the string and send it
+                except Exception as e:
+                    print(f"Error sending data to Arduino: {e}")
+        else:
+            print("No hand detected. Ensure your hand is visible and well-lit.")
+
+        # Display the image
+        cv2.imshow("Image", img)
+
+        # Break the loop if 'q' is pressed
+        if cv2.waitKey(10) & 0xFF == ord('q'):  # Increase delay to 10ms
+            break
+
+except Exception as e:
+    print(f"An error occurred: {e}")
+
+finally:
+    # Release the webcam and close all OpenCV windows
+    cap.release()
+    cv2.destroyAllWindows()
+
+    # Close the serial connection
+    if arduino is not None:
+        arduino.close()
+    print("Program exited cleanly.")
